@@ -8,12 +8,9 @@ use log;
 
 use anyhow::Result;
 use clap::Parser;
-use dht::HashNode;
+use dht::{Node, NodeServer};
 use futures::{future, prelude::*};
-use tarpc::{
-    context,
-    server::{self, Channel},
-};
+use tarpc::server::{self, Channel};
 use tarpc::{server::incoming::Incoming, tokio_serde::formats::Json};
 
 #[derive(Debug, Parser)]
@@ -23,41 +20,6 @@ struct Flags {
     port: u16,
 }
 
-type Store = Arc<Mutex<HashMap<String, String>>>;
-#[derive(Clone)]
-struct HashNodeServer {
-    store: Store,
-}
-
-impl HashNodeServer {
-    pub fn new(store: Store) -> Self {
-        HashNodeServer { store }
-    }
-}
-
-#[tarpc::server]
-impl HashNode for HashNodeServer {
-    async fn get(self, _: context::Context, key: String) -> Option<String> {
-        log::info!("Get({})", &key);
-        let store = self.store.lock().unwrap();
-        store.get(&key).map(|val| val.to_owned())
-    }
-
-    async fn insert(self, _: context::Context, key: String, value: String) -> Option<String> {
-        log::info!("Insert({}, {})", &key, &value);
-        let mut store = self.store.lock().unwrap();
-        let res = store.insert(key, value);
-        log::info!("{:?}", res);
-        return res;
-    }
-
-    async fn remove(self, _: context::Context, key: String) -> Option<String> {
-        log::info!("Remove({})", &key);
-        let mut store = self.store.lock().unwrap();
-        store.remove(&key)
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -65,7 +27,7 @@ async fn main() -> Result<()> {
     let flags = Flags::parse();
     let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), flags.port);
     let store = Arc::new(Mutex::new(HashMap::new()));
-    let server = HashNodeServer::new(store);
+    let server = NodeServer::new(store);
     let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default).await?;
     listener.config_mut().max_frame_length(usize::MAX);
     listener

@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
 use clap::{Parser, Subcommand};
-use dht::HashNodeClient;
+use dht::NodeClient;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::net::SocketAddr;
@@ -13,6 +13,7 @@ struct Flags {
     server_addr: SocketAddr,
 }
 
+/// Dht Client Interface
 #[derive(Debug, Parser)]
 struct Repl {
     #[command(subcommand)]
@@ -26,23 +27,27 @@ enum Commands {
     Del(CmdDel),
 }
 
+/// Get the value in the store associated with the key
 #[derive(Debug, Parser)]
 struct CmdGet {
     key: String,
 }
 
+/// Insert key-value pair into the store
 #[derive(Debug, Parser)]
 struct CmdSet {
     key: String,
     value: String,
 }
 
+/// Delete the key-value pair in the store
 #[derive(Debug, Parser)]
 struct CmdDel {
     key: String,
 }
 
-async fn cmd_get(cmd: CmdGet, client: &mut HashNodeClient) {
+/// Handles get command
+async fn cmd_get(cmd: CmdGet, client: &mut NodeClient) {
     let resp = async move {
         tokio::select! {
             resp = client.get(context::current(), cmd.key) => { resp }
@@ -56,7 +61,8 @@ async fn cmd_get(cmd: CmdGet, client: &mut HashNodeClient) {
     }
 }
 
-async fn cmd_set(cmd: CmdSet, client: &mut HashNodeClient) {
+/// Handles set command
+async fn cmd_set(cmd: CmdSet, client: &mut NodeClient) {
     let resp = async move {
         tokio::select! {
             resp = client.insert(context::current(), cmd.key, cmd.value) => { resp }
@@ -70,7 +76,8 @@ async fn cmd_set(cmd: CmdSet, client: &mut HashNodeClient) {
     }
 }
 
-async fn cmd_del(cmd: CmdDel, client: &mut HashNodeClient) {
+/// Handles del command
+async fn cmd_del(cmd: CmdDel, client: &mut NodeClient) {
     let resp = async move {
         tokio::select! {
             resp = client.remove(context::current(), cmd.key) => { resp }
@@ -92,7 +99,7 @@ async fn main() -> Result<()> {
     let mut transport = tarpc::serde_transport::tcp::connect(flags.server_addr, Json::default);
     transport.config_mut().max_frame_length(usize::MAX);
 
-    let mut client = HashNodeClient::new(client::Config::default(), transport.await?).spawn();
+    let mut client = NodeClient::new(client::Config::default(), transport.await?).spawn();
 
     let mut rl = DefaultEditor::new()?;
     #[cfg(feature = "with-file-history")]
@@ -104,7 +111,13 @@ async fn main() -> Result<()> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str())?;
-                let repl = Repl::parse_from(format!("dht {}", line).split(' '));
+                let repl = Repl::try_parse_from(format!("dht {}", line).split(' '));
+                if let Err(e) = repl {
+                    println!("{}", e);
+                    continue;
+                }
+
+                let repl = repl.unwrap();
                 match repl.command {
                     Commands::Get(cmd) => {
                         cmd_get(cmd, &mut client).await;
